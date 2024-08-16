@@ -39,6 +39,7 @@ exports.getApps = async (req, res) => {
 
         // Respond with downloadCounts only if user is an admin
         const responseApps = apps.map(app => ({
+            id: app._id,
             name: app.name,
             version: app.version,
             description: app.description,
@@ -71,6 +72,7 @@ exports.getAppById = async (req, res) => {
         // Respond with downloadCount only if user is an admin
         res.json({
             app: {
+                id: app._id,
                 name: app.name,
                 version: app.version,
                 description: app.description,
@@ -157,9 +159,8 @@ exports.downloadApp = async (req, res) => {
         app.downloadCount += 1;
         await app.save();
 
-        // Logic for file download goes here (e.g., streaming the file to the user)
-
-        res.json({ message: 'Download successful', app });
+        // Respond with a success message
+        res.json({ message: 'Download successful' });
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
     }
