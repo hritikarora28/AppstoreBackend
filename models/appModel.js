@@ -29,6 +29,11 @@ const appSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    visibility: {
+        type: String,
+        enum: ['public', 'private'],
+        default: 'public'
+    },
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User', required: true
@@ -36,7 +41,15 @@ const appSchema = new mongoose.Schema({
     downloadCount: {
         type: Number,
         default: 0
-    }
+    },
+    downloadedBy: [{ 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'User' // Array to store users who downloaded the app
+    }]
+}, {
+    timestamps: true // Automatically adds createdAt and updatedAt fields
+   
+
 });
 
 

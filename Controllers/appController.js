@@ -1,14 +1,9 @@
+const mongoose = require('mongoose');
 const App = require('../models/appModel');
 
-
-// Create Product (Admin Only)
+// Create App (Admin Only)
 exports.addApp = async (req, res) => {
-    const { name,description,
-        version,
-        releasedate,
-        rating,
-        genre, } = req.body;
-
+    const { name, description, version, releasedate, rating, genre, visibility } = req.body;
 
     try {
         const app = new App({
@@ -19,6 +14,7 @@ exports.addApp = async (req, res) => {
             rating,
             genre,
             user: req.user._id,
+            visibility,
         });
         await app.save();
         res.status(201).json({ message: 'App added', app });
@@ -27,28 +23,35 @@ exports.addApp = async (req, res) => {
     }
 };
 
-
-// Get All Products (Accessible by all logged-in users)
-// Get All Apps (Admins can see download counts, others cannot)
+// Get All Apps
 exports.getApps = async (req, res) => {
     try {
-        const apps = await App.find({});
-
-        // Check if the user is an admin
+        const userId = req.user ? req.user._id : null;
         const isAdmin = req.user && req.user.role === 'admin';
 
-        // Respond with downloadCounts only if user is an admin
-        const responseApps = apps.map(app => ({
-            id: app._id,
-            name: app.name,
-            version: app.version,
-            description: app.description,
-            rating: app.rating,
-            releasedate: app.releasedate,
-            genre: app.genre,
-            downloadCount: isAdmin ? app.downloadCount : undefined, // Include downloadCount only if admin
-            user: app.user
-        }));
+        // Build query based on user's role
+        const query = isAdmin
+            ? {} // Admins see all apps
+            : { $or: [{ visibility: 'public' }, { user: userId, visibility: 'private' }] }; // Users see public apps and their own private apps
+
+        const apps = await App.find(query);
+
+        // Modify response to include downloadCount only for apps that the user has downloaded or if the user is admin
+        const responseApps = apps.map(app => {
+            const hasDownloaded = app.downloadedBy.some(user => user.toString() === userId.toString());
+            return {
+                id: app._id,
+                name: app.name,
+                version: app.version,
+                description: app.description,
+                rating: app.rating,
+                releasedate: app.releasedate,
+                genre: app.genre,
+                visibility: app.visibility,
+                user: app.user,
+                downloadCount: isAdmin || hasDownloaded ? app.downloadCount : undefined, // Only show downloadCount if admin or user has downloaded
+            };
+        });
 
         res.json(responseApps);
     } catch (error) {
@@ -56,20 +59,23 @@ exports.getApps = async (req, res) => {
     }
 };
 
-
-
-// Get Product By ID (Accessible by all logged-in users)
-// Get App By ID (Admin can see download count, others cannot)
+// Get App By ID
 exports.getAppById = async (req, res) => {
     try {
         const app = await App.findById(req.params.appId);
 
         if (!app) return res.status(404).json({ message: 'App not found' });
 
-        // Check if the user is an admin
-        const isAdmin = req.user && req.user.role === 'admin';
+        const userId = req.user._id;
+        const isAdmin = req.user.role === 'admin';
+        const isOwner = app.user.toString() === req.user._id.toString();
 
-        // Respond with downloadCount only if user is an admin
+        if (app.visibility === 'private' && !isAdmin && !isOwner) {
+            return res.status(403).json({ message: 'Not authorized to view this app' });
+        }
+
+        const hasDownloaded = app.downloadedBy.some(user => user.toString() === userId.toString());
+
         res.json({
             app: {
                 id: app._id,
@@ -79,8 +85,9 @@ exports.getAppById = async (req, res) => {
                 rating: app.rating,
                 releasedate: app.releasedate,
                 genre: app.genre,
-                downloadCount: isAdmin ? app.downloadCount : undefined, // Include downloadCount only if admin
-                user: app.user
+                visibility: app.visibility,
+                downloadCount: isAdmin || hasDownloaded ? app.downloadCount : undefined, // Show downloadCount only if user has downloaded or admin
+                user: app.user,
             }
         });
     } catch (error) {
@@ -88,24 +95,18 @@ exports.getAppById = async (req, res) => {
     }
 };
 
-
-
-// Update Product (Admin Only)
+// Update App (Admin Only)
 exports.updateApp = async (req, res) => {
     try {
         const app = await App.findById(req.params.appId);
 
-
         if (!app) return res.status(404).json({ message: 'App not found' });
-
 
         if (app.user.toString() !== req.user._id.toString()) {
             return res.status(403).json({ message: 'Not authorized to update this app' });
         }
 
-
         const updatedApp = await App.findByIdAndUpdate(req.params.appId, req.body, { new: true });
-
 
         res.json({ message: 'App updated', updatedApp });
     } catch (error) {
@@ -113,60 +114,50 @@ exports.updateApp = async (req, res) => {
     }
 };
 
-
-// Delete Product (Admin Only)
+// Delete App (Admin Only)
 exports.deleteApp = async (req, res) => {
     try {
-
         const app = await App.findById(req.params.appId);
 
-
         if (!app) return res.status(404).json({ message: 'App not found' });
-
 
         if (app.user.toString() !== req.user._id.toString()) {
             return res.status(403).json({ message: 'Not authorized to delete this app' });
         }
-        console.log(" app found ",app)
 
-
-      await  App.findByIdAndDelete(req.params.appId);
+        await App.findByIdAndDelete(req.params.appId);
         res.json({ message: 'App deleted' });
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
     }
 };
 
-
-// Get comments for a product (Admin Only)
-exports.getCommentsByApp = async (req, res) => {
-    try {
-        const comments = await Comment.find({ app: req.params.appID }).populate('user', 'username');
-        res.json(comments);
-    } catch (error) {
-        res.status(500).json({ message: 'Server error', error });
-    }
-};
-
-// Increment download count and return the file (Admin Only)
+// Download App and Increment Download Count
 exports.downloadApp = async (req, res) => {
     try {
         const app = await App.findById(req.params.appId);
 
         if (!app) return res.status(404).json({ message: 'App not found' });
 
-        // Increment download count
+        const userId = req.user._id;
+        
+        // Increment download count for admin
+        if (!app.downloadedBy.includes(userId)) {
+            app.downloadedBy.push(userId); // Track user who downloaded
+        }
+
+        // Increment total download count
         app.downloadCount += 1;
+
         await app.save();
 
-        // Respond with a success message
         res.json({ message: 'Download successful' });
     } catch (error) {
         res.status(500).json({ message: 'Server error' });
     }
 };
 
-// Get download count (Admin Only)
+// Get Download Count (Admin Only)
 exports.getDownloadCount = async (req, res) => {
     try {
         const app = await App.findById(req.params.appId);
@@ -178,4 +169,5 @@ exports.getDownloadCount = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
 
