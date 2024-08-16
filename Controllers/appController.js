@@ -29,10 +29,30 @@ exports.getApps = async (req, res) => {
         const userId = req.user ? req.user._id : null;
         const isAdmin = req.user && req.user.role === 'admin';
 
-        // Build query based on user's role
-        const query = isAdmin
+        // Extract query parameters
+        const { name, genre, rating, visibility } = req.query;
+
+        // Build query based on user's role and search parameters
+        let query = isAdmin
             ? {} // Admins see all apps
             : { $or: [{ visibility: 'public' }, { user: userId, visibility: 'private' }] }; // Users see public apps and their own private apps
+
+        if (name) {
+            query.name = { $regex: new RegExp(name, 'i') }; // Case-insensitive search for name
+        }
+
+        if (genre) {
+            query.genre = genre; // Exact match for genre
+        }
+
+        if (rating) {
+            const [minRating, maxRating] = rating.split(',').map(Number);
+            query.rating = { $gte: minRating, $lte: maxRating }; // Range for rating
+        }
+
+        if (visibility) {
+            query.visibility = visibility; // Exact match for visibility
+        }
 
         const apps = await App.find(query);
 
