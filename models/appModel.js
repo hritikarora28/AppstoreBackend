@@ -33,6 +33,10 @@ const appSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User', required: true
     },
+    downloadCount: {
+        type: Number,
+        default: 0
+    }
 });
 
 
